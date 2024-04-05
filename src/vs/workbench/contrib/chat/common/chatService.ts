@@ -9,21 +9,17 @@ import { IMarkdownString } from 'vs/base/common/htmlContent';
 import { IDisposable } from 'vs/base/common/lifecycle';
 import { URI } from 'vs/base/common/uri';
 import { IRange, Range } from 'vs/editor/common/core/range';
-import { Command, Location, ProviderResult } from 'vs/editor/common/languages';
+import { Command, Location, ProviderResult, TextEdit } from 'vs/editor/common/languages';
 import { FileType } from 'vs/platform/files/common/files';
 import { createDecorator } from 'vs/platform/instantiation/common/instantiation';
-import { IChatAgentCommand, IChatAgentData, IChatAgentResult } from 'vs/workbench/contrib/chat/common/chatAgents';
+import { ChatAgentLocation, IChatAgentCommand, IChatAgentData, IChatAgentResult } from 'vs/workbench/contrib/chat/common/chatAgents';
 import { ChatModel, IChatModel, IChatRequestVariableData, ISerializableChatData } from 'vs/workbench/contrib/chat/common/chatModel';
 import { IParsedChatRequest } from 'vs/workbench/contrib/chat/common/chatParserTypes';
+import { IChatParserContext } from 'vs/workbench/contrib/chat/common/chatRequestParser';
 import { IChatRequestVariableValue } from 'vs/workbench/contrib/chat/common/chatVariables';
 
 export interface IChat {
 	id: number; // TODO Maybe remove this and move to a subclass that only the provider knows about
-	requesterUsername: string;
-	requesterAvatarIconUri?: URI;
-	responderUsername: string;
-	responderAvatarIconUri?: URI;
-	inputPlaceholder?: string;
 	dispose?(): void;
 }
 
@@ -78,8 +74,13 @@ export function isIUsedContext(obj: unknown): obj is IChatUsedContext {
 	);
 }
 
+export interface IChatContentVariableReference {
+	variableName: string;
+	value?: URI | Location;
+}
+
 export interface IChatContentReference {
-	reference: URI | Location;
+	reference: URI | Location | IChatContentVariableReference;
 	kind: 'reference';
 }
 
@@ -90,7 +91,7 @@ export interface IChatContentInlineReference {
 }
 
 export interface IChatAgentDetection {
-	agentName: string;
+	agentId: string;
 	command?: IChatAgentCommand;
 	kind: 'agentDetection';
 }
@@ -138,6 +139,12 @@ export interface IChatCommandButton {
 	kind: 'command';
 }
 
+export interface IChatTextEdit {
+	uri: URI;
+	edits: TextEdit[];
+	kind: 'textEdit';
+}
+
 export type IChatProgress =
 	| IChatContent
 	| IChatMarkdownContent
@@ -149,7 +156,8 @@ export type IChatProgress =
 	| IChatContentInlineReference
 	| IChatAgentDetection
 	| IChatProgressMessage
-	| IChatCommandButton;
+	| IChatCommandButton
+	| IChatTextEdit;
 
 export interface IChatProvider {
 	readonly id: string;
@@ -159,6 +167,8 @@ export interface IChatProvider {
 export interface IChatFollowup {
 	kind: 'reply';
 	message: string;
+	agentId: string;
+	subCommand?: string;
 	title?: string;
 	tooltip?: string;
 }
@@ -175,7 +185,7 @@ export interface IChatVoteAction {
 	reportIssue?: boolean;
 }
 
-export enum ChatAgentCopyKind {
+export enum ChatCopyKind {
 	// Keyboard shortcut or context menu
 	Action = 1,
 	Toolbar = 2
@@ -184,7 +194,7 @@ export enum ChatAgentCopyKind {
 export interface IChatCopyAction {
 	kind: 'copy';
 	codeBlockIndex: number;
-	copyKind: ChatAgentCopyKind;
+	copyKind: ChatCopyKind;
 	copiedCharacters: number;
 	totalCharacters: number;
 	copiedText: string;
@@ -260,13 +270,18 @@ export interface IChatTransferredSessionData {
 	inputValue: string;
 }
 
+export interface IChatSendRequestData {
+	responseCompletePromise: Promise<void>;
+	agent: IChatAgentData;
+	slashCommand?: IChatAgentCommand;
+}
+
 export const IChatService = createDecorator<IChatService>('IChatService');
 
 export interface IChatService {
 	_serviceBrand: undefined;
 	transferredSessionData: IChatTransferredSessionData | undefined;
 
-	onDidSubmitAgent: Event<{ agent: IChatAgentData; slashCommand: IChatAgentCommand; sessionId: string }>;
 	onDidRegisterProvider: Event<{ providerId: string }>;
 	onDidUnregisterProvider: Event<{ providerId: string }>;
 	registerProvider(provider: IChatProvider): IDisposable;
@@ -281,12 +296,11 @@ export interface IChatService {
 	/**
 	 * Returns whether the request was accepted.
 	 */
-	sendRequest(sessionId: string, message: string): Promise<{ responseCompletePromise: Promise<void> } | undefined>;
+	sendRequest(sessionId: string, message: string, implicitVariablesEnabled?: boolean, location?: ChatAgentLocation, parserContext?: IChatParserContext): Promise<IChatSendRequestData | undefined>;
 	removeRequest(sessionid: string, requestId: string): Promise<void>;
 	cancelCurrentRequestForSession(sessionId: string): void;
 	clearSession(sessionId: string): void;
 	addCompleteRequest(sessionId: string, message: IParsedChatRequest | string, variableData: IChatRequestVariableData | undefined, response: IChatCompleteResponse): void;
-	sendRequestToProvider(sessionId: string, message: IChatDynamicRequest): void;
 	getHistory(): IChatDetail[];
 	clearAllHistoryEntries(): void;
 	removeHistoryEntry(sessionId: string): void;

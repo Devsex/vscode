@@ -107,6 +107,7 @@ export class CommentThreadWidget<T extends IRange | ICellRange = IRange> extends
 
 		const tracker = this._register(dom.trackFocus(bodyElement));
 		this._register(registerNavigableContainer({
+			name: 'commentThreadWidget',
 			focusNotifiers: [tracker],
 			focusNextWidget: () => {
 				if (!this._commentReply?.isCommentEditorFocused()) {
@@ -261,6 +262,7 @@ export class CommentThreadWidget<T extends IRange | ICellRange = IRange> extends
 
 	override dispose() {
 		super.dispose();
+		dispose(this._commentThreadDisposables);
 		this.updateCurrentThread(false, false);
 	}
 
@@ -350,7 +352,7 @@ export class CommentThreadWidget<T extends IRange | ICellRange = IRange> extends
 	}
 
 	focusCommentEditor() {
-		this._commentReply?.focusCommentEditor();
+		this._commentReply?.expandReplyAreaAndFocusCommentEditor();
 	}
 
 	focus() {

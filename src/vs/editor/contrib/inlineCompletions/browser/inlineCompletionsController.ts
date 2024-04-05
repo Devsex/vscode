@@ -23,14 +23,15 @@ import { InlineCompletionsHintsWidget, InlineSuggestionHintsContentWidget } from
 import { InlineCompletionsModel, VersionIdChangeReason } from 'vs/editor/contrib/inlineCompletions/browser/inlineCompletionsModel';
 import { SuggestWidgetAdaptor } from 'vs/editor/contrib/inlineCompletions/browser/suggestWidgetInlineCompletionProvider';
 import { localize } from 'vs/nls';
-import { AudioCue, IAudioCueService } from 'vs/platform/audioCues/browser/audioCueService';
+import { AccessibilitySignal, IAccessibilitySignalService } from 'vs/platform/accessibilitySignal/browser/accessibilitySignalService';
 import { ICommandService } from 'vs/platform/commands/common/commands';
 import { IConfigurationService } from 'vs/platform/configuration/common/configuration';
 import { IContextKeyService } from 'vs/platform/contextkey/common/contextkey';
 import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
 import { IKeybindingService } from 'vs/platform/keybinding/common/keybinding';
 import { mapObservableArrayCached } from 'vs/base/common/observableInternal/utils';
-import { ISettableObservable } from 'vs/base/common/observableInternal/base';
+import { ISettableObservable, observableValueOpts } from 'vs/base/common/observableInternal/base';
+import { itemsEquals, itemEquals } from 'vs/base/common/equals';
 
 export class InlineCompletionsController extends Disposable {
 	static ID = 'editor.contrib.inlineCompletionsController';
@@ -41,7 +42,7 @@ export class InlineCompletionsController extends Disposable {
 
 	public readonly model = this._register(disposableObservableValue<InlineCompletionsModel | undefined>('inlineCompletionModel', undefined));
 	private readonly _textModelVersionId = observableValue<number, VersionIdChangeReason>(this, -1);
-	private readonly _positions = observableValue<readonly Position[]>(this, [new Position(1, 1)]);
+	private readonly _positions = observableValueOpts<readonly Position[]>({ owner: this, equalsFn: itemsEquals(itemEquals()) }, [new Position(1, 1)]);
 	private readonly _suggestWidgetAdaptor = this._register(new SuggestWidgetAdaptor(
 		this.editor,
 		() => this.model.get()?.selectedInlineCompletion.get()?.toSingleTextEdit(undefined),
@@ -78,7 +79,7 @@ export class InlineCompletionsController extends Disposable {
 		{ min: 50, max: 50 }
 	);
 
-	private readonly _playAudioCueSignal = observableSignal(this);
+	private readonly _playAccessibilitySignal = observableSignal(this);
 
 	private readonly _isReadonly = observableFromEvent(this.editor.onDidChangeConfiguration, () => this.editor.getOption(EditorOption.readOnly));
 	private readonly _textModel = observableFromEvent(this.editor.onDidChangeModel, () => this.editor.getModel());
@@ -92,7 +93,7 @@ export class InlineCompletionsController extends Disposable {
 		@ICommandService private readonly _commandService: ICommandService,
 		@ILanguageFeatureDebounceService private readonly _debounceService: ILanguageFeatureDebounceService,
 		@ILanguageFeaturesService private readonly _languageFeaturesService: ILanguageFeaturesService,
-		@IAudioCueService private readonly _audioCueService: IAudioCueService,
+		@IAccessibilitySignalService private readonly _accessibilitySignalService: IAccessibilitySignalService,
 		@IKeybindingService private readonly _keybindingService: IKeybindingService,
 	) {
 		super();
@@ -213,14 +214,14 @@ export class InlineCompletionsController extends Disposable {
 		let lastInlineCompletionId: string | undefined = undefined;
 		this._register(autorunHandleChanges({
 			handleChange: (context, changeSummary) => {
-				if (context.didChange(this._playAudioCueSignal)) {
+				if (context.didChange(this._playAccessibilitySignal)) {
 					lastInlineCompletionId = undefined;
 				}
 				return true;
 			},
 		}, async reader => {
-			/** @description InlineCompletionsController.playAudioCueAndReadSuggestion */
-			this._playAudioCueSignal.read(reader);
+			/** @description InlineCompletionsController.playAccessibilitySignalAndReadSuggestion */
+			this._playAccessibilitySignal.read(reader);
 
 			const model = this.model.read(reader);
 			const state = model?.state.read(reader);
@@ -232,7 +233,7 @@ export class InlineCompletionsController extends Disposable {
 			if (state.inlineCompletion.semanticId !== lastInlineCompletionId) {
 				lastInlineCompletionId = state.inlineCompletion.semanticId;
 				const lineText = model.textModel.getLineContent(state.primaryGhostText.lineNumber);
-				this._audioCueService.playAudioCue(AudioCue.inlineSuggestion).then(() => {
+				this._accessibilitySignalService.playSignal(AccessibilitySignal.inlineSuggestion).then(() => {
 					if (this.editor.getOption(EditorOption.screenReaderAnnounceInlineSuggestion)) {
 						this.provideScreenReaderUpdate(state.primaryGhostText.renderForScreenReader(lineText));
 					}
@@ -249,8 +250,8 @@ export class InlineCompletionsController extends Disposable {
 		this.editor.updateOptions({ inlineCompletionsAccessibilityVerbose: this._configurationService.getValue('accessibility.verbosity.inlineCompletions') });
 	}
 
-	public playAudioCue(tx: ITransaction) {
-		this._playAudioCueSignal.trigger(tx);
+	public playAccessibilitySignal(tx: ITransaction) {
+		this._playAccessibilitySignal.trigger(tx);
 	}
 
 	private provideScreenReaderUpdate(content: string): void {
